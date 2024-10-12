@@ -1,4 +1,4 @@
-var KissFFTModule = function(KissFFTModule) {
+const KissFFTModule = function(KissFFTModule) {
   KissFFTModule = KissFFTModule || {};
   var Module = KissFFTModule;
 
@@ -21,6 +21,5 @@ var ga=[Ta,za];var ha=[Ua,Ga,Aa,Ua];return{_kiss_fftr_alloc:ua,_kiss_fftri:wa,_m
 
   return KissFFTModule;
 };
-if (typeof module === "object" && module.exports) {
-  module['exports'] = KissFFTModule;
-};
+
+export default KissFFTModule;

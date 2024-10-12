@@ -6,7 +6,10 @@
 // 1 or other value = Hann
 // 2 = sine
 
-function MMLLSTFT(fftsize=1024,hopsize=512,windowtype=0,postfftfunction) {
+import { MMLLwindowing } from './MMLLwindowing';
+import { FFT, FFTR } from './KissFFT/KissFFTwrapper';
+
+export function MMLLSTFT(fftsize=1024,hopsize=512,windowtype=0,postfftfunction) {
     
     var self = this;
     

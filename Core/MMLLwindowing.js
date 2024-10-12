@@ -1,7 +1,7 @@
 //gather data for a certain window size and hop size (for example, as prelude to short term Fourier transform)
 
 //MMLL = Musical Machine Listening Library MMLL.js
-function MMLLwindowing(windowsize=1024,hopsize=512) {
+export function MMLLwindowing(windowsize=1024,hopsize=512) {
     
     var self = this;
     

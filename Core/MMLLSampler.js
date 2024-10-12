@@ -4,7 +4,7 @@
 //asynchronous loading, with function to call upon completion passed in
 
 //shared between Sampler and MMLLWebAudioSetup
-function MMLLInputAudio(blocksize)
+export function MMLLInputAudio(blocksize)
 {
     var self = this;
     
@@ -13,7 +13,7 @@ function MMLLInputAudio(blocksize)
 	self.inputR = new Float32Array(blocksize);
     self.numChannels = 1;
 }
-function MMLLOutputAudio(blocksize)
+export function MMLLOutputAudio(blocksize)
 {
     var self = this;
     
@@ -23,7 +23,7 @@ function MMLLOutputAudio(blocksize)
 
 
 //no longer uses interleaved audio if multiple channels
-function MMLLBuffer() {
+export function MMLLBuffer() {
     
     var self = this;
     

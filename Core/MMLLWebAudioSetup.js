@@ -1,8 +1,9 @@
+import { MMLLInputAudio } from './MMLLSampler.js';
+import { MMLLOutputAudio } from './MMLLSampler.js';
+
 //put all the awkward Web Audio API setup code here
 
-
-
-function MMLLWebAudioSetup(blocksize, inputtype, callback, setup) {
+export function MMLLWebAudioSetup(blocksize, inputtype, callback, setup) {
  
     var self = this;
     

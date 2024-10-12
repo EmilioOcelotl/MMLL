@@ -12,8 +12,9 @@
 //assumes blocksizes itself?
 //function OnsetDetector(N,SR)
 
+import { MMLLSTFT } from '../Core/MMLLSTFT.js';
 
-function MMLLOnsetDetector(sampleRate,threshold=0.34) {
+export function MMLLOnsetDetector(sampleRate,threshold=0.34) {
     
     var self = this; 
     //helpful constants
