@@ -244,14 +244,14 @@ export function MMLLWebAudioSetup(blocksize, inputtype, callback, setup) {
         
         for (var i = 0; i < n; ++i) {
             
-            inputnow = inputL[i];
+            let inputnow = inputL[i];
             
             //clip input deliberately to avoid blowing filters later
             if(inputnow>1.0) inputnow = 1.0;
             if(inputnow<-1.0) inputnow = -1.0;
             
             //subnormal floating point protection on input
-            absx = Math.abs(inputnow);
+            let absx = Math.abs(inputnow);
             inputL[i] = (absx > 1e-15 && absx < 1e15) ? inputnow : 0.;
             
         }
@@ -262,14 +262,14 @@ export function MMLLWebAudioSetup(blocksize, inputtype, callback, setup) {
             
             for (var i = 0; i < n; ++i) {
                 
-                inputnow = inputR[i];
+                let inputnow = inputR[i];
                 
                 //clip input deliberately to avoid blowing filters later
                 if(inputnow>1.0) inputnow = 1.0;
                 if(inputnow<-1.0) inputnow = -1.0;
                 
                 //subnormal floating point protection on input
-                absx = Math.abs(inputnow);
+                let absx = Math.abs(inputnow);
                 inputR[i] = (absx > 1e-15 && absx < 1e15) ? inputnow : 0.;
                 
             }
