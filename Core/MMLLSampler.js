@@ -39,7 +39,7 @@ export function MMLLBuffer() {
 
 
 //contains state for block by block playback of a mono OR stereo buffer object
-function MMLLSamplePlayer() {
+export function MMLLSamplePlayer() {
     
     var self = this;
     
@@ -218,7 +218,7 @@ function MMLLSamplePlayer() {
 
 
 
-function MMLLSampler() {
+export function MMLLSampler() {
     
     //https://stackoverflow.com/questions/20279484/how-to-access-the-correct-this-inside-a-callback
     var self = this;
