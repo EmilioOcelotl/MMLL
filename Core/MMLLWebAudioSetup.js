@@ -1,356 +1,227 @@
+//Nick Collins 13/6/05 onset detection MIREX algorithm (adapted from SC3 UGen for stream based calculation)
+//C code version Nick Collins 20 May 2005
+//js version 2018
+//trying to implement the best onset detection algo from AES118 paper, with event analysis data to be written to a buffer
+//for potential NRT and RT use
+//stores up to a second of audio, assumes that events are not longer than that minus a few FFT frames
+//assumes 44100 SR and FFT of 1024, 512 overlap
+
 import { MMLLInputAudio } from './MMLLSampler.js';
 import { MMLLOutputAudio } from './MMLLSampler.js';
 import { MMLLSampler } from './MMLLSampler.js';
 import { MMLLSamplePlayer } from './MMLLSampler.js';
 
-
-
-//put all the awkward Web Audio API setup code here
-
 export function MMLLWebAudioSetup(blocksize, inputtype, callback, setup) {
- 
     var self = this;
     
     self.audioblocksize = blocksize;
     self.inputtype = inputtype;
     self.inputAudio = new MMLLInputAudio(self.audioblocksize);
-    self.outputAudio = new MMLLOutputAudio(self.audioblocksize); //always stereo for now
-    
+    self.outputAudio = new MMLLOutputAudio(self.audioblocksize);
     self.callback = callback;
     self.setup = setup;
-    
     self.sampleRate = 0;
     self.audiocontext = 0;
     self.node = 0;
     self.numInputChannels = 1;
-    //self.audionotrunning = 1;
     self.audiorunning = false;
-    
-    self.usingMicrophone = function() {
-        
-        return ((self.inputtype == 1) || (self.inputtype == 2));
-    }
-    
-    
-    self.initAudio = function(inputstream) {
-        
-        console.log('initialising audio'); //debug console message
-        
-        //delete previous if necessary
-        if (self.audiorunning) {
-            
-            self.audiocontext.close(); //let previous go
+    self.currentSource = null;
+    self.audioStream = null;
+    self.audioBufferSource = null;
+
+    self.switchAudioSource = function(newInputType, audioSource) {
+        if (self.currentSource) {
+            self.currentSource.disconnect();
+            if (self.currentSource.stop) self.currentSource.stop();
+            self.currentSource = null;
         }
-        
-        //can request specific sample rate, but leaving as device's default for now
-        //https://developer.mozilla.org/en-US/docs/Web/API/AudioContext/AudioContext
+
+        if (self.audiocontext) {
+            self.audiocontext.close();
+        }
+
+        if (newInputType === 1 || newInputType === 2) {
+            if (!navigator.getUserMedia) {
+                navigator.getUserMedia = navigator.getUserMedia || navigator.webkitGetUserMedia ||
+                    navigator.mozGetUserMedia || navigator.msGetUserMedia;
+            }
+            
+            navigator.getUserMedia({audio: true}, function(stream) {
+                self.audioStream = stream;
+                self.initAudio(stream);
+            }, function(e) {
+                console.error('Error getting audio:', e);
+            });
+        } else if (newInputType === 3) {
+            if (audioSource instanceof AudioBuffer) {
+                // Si ya tenemos el AudioBuffer
+                self.audioBufferSource = self.audiocontext.createBufferSource();
+                self.audioBufferSource.buffer = audioSource;
+                self.currentSource = self.audioBufferSource;
+                
+                self.node = self.audiocontext.createScriptProcessor(blocksize, 0, 2);
+                self.node.onaudioprocess = self.processSoundFile;
+                self.audioBufferSource.connect(self.node);
+                self.node.connect(self.audiocontext.destination);
+                self.audioBufferSource.start(0);
+            } else if (typeof audioSource === 'string') {
+                // Si es una ruta, cargamos el archivo primero
+                fetch(audioSource)
+                    .then(response => response.arrayBuffer())
+                    .then(arrayBuffer => self.audiocontext.decodeAudioData(arrayBuffer))
+                    .then(audioBuffer => {
+                        self.switchAudioSource(3, audioBuffer); // Llamada recursiva con el buffer
+                    })
+                    .catch(err => console.error('Error loading audio:', err));
+            }
+        } else {
+            self.initAudio();
+        }
+    };
+
+    self.usingMicrophone = function() {
+        return ((self.inputtype == 1) || (self.inputtype == 2));
+    };
+
+    self.initAudio = function(inputstream) {
+        if (self.audiorunning) {
+            self.audiocontext.close();
+        }
+
         try {
             self.audiocontext = new webkitAudioContext();
-            
         } catch (e) {
-            
             try {
-                
                 self.audiocontext = new AudioContext();
-                
             } catch(e) {
-                
                 alert("Your browser does not support Web Audio API!");
                 return;
             }
-            
         }
-        
-        self.sampleRate = self.audiocontext.sampleRate; //usually 44100.0
-        
-        console.log("AudioContext established with sample rate:",self.sampleRate," and now setting up for input type:",self.inputtype); //print
-        
-        self.setup(self.sampleRate);
-        
-        if((self.inputtype == 1) || (self.inputtype == 2)) {
-            
-            var audioinput = self.audiocontext.createMediaStreamSource(inputstream);
-            
-            self.numInputChannels = self.inputtype; //1 or 2 inputs
-            
-            self.inputAudio.numChannels = self.numInputChannels;
-            
-            self.node = self.audiocontext.createScriptProcessor(self.audioblocksize,self.numInputChannels,2); //1 or 2 inputs, 2 outputs
-            
-            audioinput.connect(self.node);
-            
-            self.node.onaudioprocess = self.process;  //this is nil since this isn't what you think it is here
-            
-            self.node.connect(self.audiocontext.destination);
-            
-        } else {
-            
-            
-            if(self.inputtype == 0) {
-             
-                //no input
-                
-                self.node = self.audiocontext.createScriptProcessor(self.audioblocksize,0,2); //0 input, 2 outputs
-                self.node.onaudioprocess = self.synthesizeAudio;
-                
-                //direct synthesis
-                self.node.connect(self.audiocontext.destination);
-                
-            
-            } else {
-            
-            //            self.node = self.audiocontext.createScriptProcessor(self.audioblocksize,0,2); //0 input, 2 outputs
-            //
-            //            self.node.onaudioprocess = self.processSoundFile;
-            //
-            self.initSoundFileRead(self.inputtype);
-                
-            }
-            
-        }
-        
-        self.audiorunning = true;
-        //self.audionotrunning = 0;
-        
-    };
-    
-    self.initSoundFileRead = function(filename) {
-        
-        self.sampler = new MMLLSampler();
-        //self.sampleplayer;
-        //was Float64Array
-        //self.samplearray = new Float32Array(audioblocksize);
-        
-        //"/sounds/05_radiohead_killer_cars.wav"
-        self.sampler.loadSamples([filename],
-                            function onload() {
-                            
-                            self.sampleplayer = new MMLLSamplePlayer();
-                            self.sampleplayer.reset(self.sampler.buffers[0]);
-                            //self.sampleplayer.numChannels = self.sampler.buffers[0]
-                            
-                            if(self.sampleplayer.numChannels>1) {
-                            //interleaved input
-                            self.numInputChannels = 2;
-                            
-                            self.inputAudio.numChannels = self.numInputChannels;
-                            //self.samplearray = new Float32Array(2*audioblocksize);
-                            
-                            }
-                            
-                            //samplearray depends on number of Channels whether interleaved
-                            
-                            // This AudioNode will create the samples directly in JavaScript
-                            //proceed with hop size worth of samples
-                            self.node = self.audiocontext.createScriptProcessor(self.audioblocksize,0,2); //0 input, 2 outputs
-                            self.node.onaudioprocess = self.processSoundFile;
-                            
-                            //direct synthesis
-                            self.node.connect(self.audiocontext.destination);
-                            
-                            
-                            },self.audiocontext);
-        
-    };
-    
-    self.synthesizeAudio = function(event) {
-       
-        // Get output arrays
-        var outputArrayL = event.outputBuffer.getChannelData(0);
-        var outputArrayR = event.outputBuffer.getChannelData(1);
-        
-        //number of samples to calculate is based on (common) length of these buffers
-        var n = outputArrayL.length;
-        
-        var i;
-        
-        //safety, zero out output if accumulating to it
-        for (var i = 0; i < n; ++i) outputArrayL[i] = outputArrayR[i] = 0.0;
-        
-        self.outputAudio.outputL = outputArrayL;
-        self.outputAudio.outputR = outputArrayR;
-        
-        //no input argument, just synthesise output entirely
-        self.callback(self.outputAudio,n);
-        
-    };
-    
-    
-    
-    self.processSoundFile = function(event) {
-        // Get output arrays
-        var outputArrayL = event.outputBuffer.getChannelData(0);
-        var outputArrayR = event.outputBuffer.getChannelData(1);
-        //var input = event.inputBuffer.getChannelData(0);
 
-        //number of samples to calculate is based on (common) length of these buffers
-        var n = outputArrayL.length; //outputArrayL.length;
-        
-        var i;
-        //console.log("processSoundFile",event,n);
-        
-//        if(self.numInputChannels==2) {
-//           
-//            
-//            
-//            
-//            for (i = 0; i< 2*n; ++i)
-//                self.samplearray[i] = 0.0;
-//            
-//           
-//        } else {
-//        
-//        //listening
-//        for (i = 0; i< n; ++i)
-//            self.samplearray[i] = 0.0;
-//        
-//        }
-        
-        //safety, zero out input if accumulating to it
-        
-        for (var i = 0; i < n; ++i) self.inputAudio.monoinput[i] = self.inputAudio.inputL[i] = self.inputAudio.inputR[i] = 0.0;
-        
-        
-        //self.sampleplayer.render(self.samplearray,n);
-        self.sampleplayer.render(self.inputAudio,n);
-   
-       
-        //safety, zero out output if accumulating to it
+        self.sampleRate = self.audiocontext.sampleRate;
+        self.setup(self.sampleRate);
+
+        if((self.inputtype == 1) || (self.inputtype == 2)) {
+            var audioinput = self.audiocontext.createMediaStreamSource(inputstream);
+            self.currentSource = audioinput;
+            self.numInputChannels = self.inputtype;
+            self.inputAudio.numChannels = self.numInputChannels;
+            self.node = self.audiocontext.createScriptProcessor(self.audioblocksize,self.numInputChannels,2);
+            audioinput.connect(self.node);
+            self.node.onaudioprocess = self.process;
+            self.node.connect(self.audiocontext.destination);
+        } else {
+            if(self.inputtype == 0) {
+                self.node = self.audiocontext.createScriptProcessor(self.audioblocksize,0,2);
+                self.node.onaudioprocess = self.synthesizeAudio;
+                self.node.connect(self.audiocontext.destination);
+            } else {
+                self.initSoundFileRead(self.inputtype);
+            }
+        }
+        self.audiorunning = true;
+    };
+
+    self.initSoundFileRead = function(filename) {
+        self.sampler = new MMLLSampler();
+        self.sampler.loadSamples([filename], function onload() {
+            self.sampleplayer = new MMLLSamplePlayer();
+            self.sampleplayer.reset(self.sampler.buffers[0]);
+            
+            if(self.sampleplayer.numChannels>1) {
+                self.numInputChannels = 2;
+                self.inputAudio.numChannels = self.numInputChannels;
+            }
+
+            self.audioBufferSource = self.audiocontext.createBufferSource();
+            self.audioBufferSource.buffer = self.sampler.buffers[0];
+            self.currentSource = self.audioBufferSource;
+
+            self.node = self.audiocontext.createScriptProcessor(self.audioblocksize,0,2);
+            self.node.onaudioprocess = self.processSoundFile;
+            self.audioBufferSource.connect(self.node);
+            self.node.connect(self.audiocontext.destination);
+            self.audioBufferSource.start(0);
+        }, self.audiocontext);
+    };
+
+    self.synthesizeAudio = function(event) {
+        var outputArrayL = event.outputBuffer.getChannelData(0);
+        var outputArrayR = event.outputBuffer.getChannelData(1);
+        var n = outputArrayL.length;
         for (var i = 0; i < n; ++i) outputArrayL[i] = outputArrayR[i] = 0.0;
-        
         self.outputAudio.outputL = outputArrayL;
         self.outputAudio.outputR = outputArrayR;
-        
-       
-        
-        
-        //self.callback(inputL,outputArrayL,outputArrayR,n);
-        self.callback(self.inputAudio,self.outputAudio,n);
-        
-        
-        //self.callback(self.samplearray,outputArrayL,outputArrayR,n);
-        
+        self.callback(self.outputAudio,n);
     };
-    
+
+    self.processSoundFile = function(event) {
+        var outputArrayL = event.outputBuffer.getChannelData(0);
+        var outputArrayR = event.outputBuffer.getChannelData(1);
+        var n = outputArrayL.length;
+        for (var i = 0; i < n; ++i) self.inputAudio.monoinput[i] = self.inputAudio.inputL[i] = self.inputAudio.inputR[i] = 0.0;
+        self.sampleplayer.render(self.inputAudio,n);
+        for (var i = 0; i < n; ++i) outputArrayL[i] = outputArrayR[i] = 0.0;
+        self.outputAudio.outputL = outputArrayL;
+        self.outputAudio.outputR = outputArrayR;
+        self.callback(self.inputAudio,self.outputAudio,n);
+    };
+
     self.process = function(event) {
-        // Get output arrays
         var outputArrayL = event.outputBuffer.getChannelData(0);
         var outputArrayR = event.outputBuffer.getChannelData(1);
         var inputL = event.inputBuffer.getChannelData(0);
-       
-        
-        //number of samples to calculate is based on (common) length of these buffers
-        var n = inputL.length; //outputArrayL.length;
+        var n = inputL.length;
 
-        //console.log("process",event,n);
-        
-        //denormal safety checks on input
-        
         for (var i = 0; i < n; ++i) {
-            
             let inputnow = inputL[i];
-            
-            //clip input deliberately to avoid blowing filters later
             if(inputnow>1.0) inputnow = 1.0;
             if(inputnow<-1.0) inputnow = -1.0;
-            
-            //subnormal floating point protection on input
             let absx = Math.abs(inputnow);
             inputL[i] = (absx > 1e-15 && absx < 1e15) ? inputnow : 0.;
-            
         }
-        
+
         if(self.numInputChannels == 2) {
             var inputR = event.inputBuffer.getChannelData(1);
-            
-            
             for (var i = 0; i < n; ++i) {
-                
                 let inputnow = inputR[i];
-                
-                //clip input deliberately to avoid blowing filters later
                 if(inputnow>1.0) inputnow = 1.0;
                 if(inputnow<-1.0) inputnow = -1.0;
-                
-                //subnormal floating point protection on input
                 let absx = Math.abs(inputnow);
                 inputR[i] = (absx > 1e-15 && absx < 1e15) ? inputnow : 0.;
-                
             }
 
-            var left, right;
             var monoinput = self.inputAudio.monoinput;
-
             for (var i = 0; i < n; ++i) {
-                
-                left = inputL[i];
-                right = inputR[i];
-                monoinput[i] = (left+right)*0.5;
-                
+                monoinput[i] = (inputL[i]+inputR[i])*0.5;
             }
             
             self.inputAudio.inputL = inputL;
             self.inputAudio.inputR = inputR;
-            
-            
         } else {
-            
             self.inputAudio.monoinput = inputL;
             self.inputAudio.inputL = inputL;
             self.inputAudio.inputR = inputL;
-            
-//            left = self.inputAudio.inputL;
-//            right = self.inputAudio.inputR;
-//            
-//            for (var i = 0; i < n; ++i) {
-//                
-//                left[i] = inputL[i];
-//                right[i] = inputL[i];
-//                
-//            }
-            
-            
         }
-        
-        //safety, zero out output if accumulating to it
+
         for (var i = 0; i < n; ++i) outputArrayL[i] = outputArrayR[i] = 0.0;
-        
         self.outputAudio.outputL = outputArrayL;
         self.outputAudio.outputR = outputArrayR;
-        
-        //self.callback(inputL,outputArrayL,outputArrayR,n);
         self.callback(self.inputAudio,self.outputAudio,n);
-        
     };
-    
-    //if(self.audionotrunning) {
-        
-        console.log('init MMLLWebAudioSetup');
-        
-        //microphone input
-        if(inputtype == 1 || inputtype == 2) {
-            
-            //navigator.mediaDevices.getUserMedia
-            //https://stackoverflow.com/questions/37673000/typeerror-getusermedia-called-on-an-object-that-does-not-implement-interface
-            
-            if (!navigator.getUserMedia)
-                navigator.getUserMedia = navigator.getUserMedia || navigator.webkitGetUserMedia ||
-                 navigator.mozGetUserMedia || navigator.msGetUserMedia;
-            
-            navigator.getUserMedia({audio:true}, self.initAudio, function(e) {
-                                   alert('Error getting audio');
-                                   console.log(e);
-                                   });
-            
-            
-        } else {
-            
-            self.initAudio();
-            
-        }
-        
-        
-    //};
-    
-}
 
+    console.log('init MMLLWebAudioSetup');
+    if(inputtype == 1 || inputtype == 2) {
+        if (!navigator.getUserMedia)
+            navigator.getUserMedia = navigator.getUserMedia || navigator.webkitGetUserMedia ||
+             navigator.mozGetUserMedia || navigator.msGetUserMedia;
+        
+        navigator.getUserMedia({audio:true}, self.initAudio, function(e) {
+                               alert('Error getting audio');
+                               console.log(e);
+                               });
+    } else {
+        self.initAudio();
+    }
+}
